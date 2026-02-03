@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+新对话
+
 <head>
+新对话
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>创业计划书协作讨论平台</title>
@@ -8,6 +12,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- 引入Font Awesome图标 -->
   <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+  <!-- 引入Supabase客户端 -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- 配置Tailwind自定义颜色和字体 -->
   <script>
     tailwind.config = {
@@ -401,7 +407,12 @@
   </div>
 
   <script>
-    // 本地存储键名定义
+    // Supabase配置
+    const supabaseUrl = 'https://rjbyjjoeswundtjhxuio.supabase.co';
+    const supabaseAnonKey = 'sb_publishable_oBtPvlHxwdNuM0PAwAooug_NalKqQqB';
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    // 本地存储键名定义（保留用于临时存储和兼容性）
     const STORAGE_KEYS = {
       USERS: 'entrepreneurship_platform_users',
       TOPICS: 'entrepreneurship_platform_topics',
@@ -412,16 +423,121 @@
     };
 
     // 初始化页面
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', async function() {
       initStorage();
+      await initSupabase();
       bindEvents();
       checkLoginStatus();
       updateRegisterQuota();
       renderAllData();
     });
 
+    // Supabase数据库初始化
+    async function initSupabase() {
+      try {
+        // 测试Supabase连接
+        const { data, error } = await supabase.from('users').select('*').limit(1);
+        if (error && error.code === '42P01') {
+          // 表不存在，需要创建（实际项目中应在Supabase控制台执行SQL）
+          console.log('数据库表未创建，请在Supabase控制台执行以下SQL语句：');
+          console.log(`
+            -- 创建users表
+            CREATE TABLE IF NOT EXISTS users (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              username TEXT UNIQUE NOT NULL,
+              password TEXT NOT NULL,
+              created_at TIMESTAMP DEFAULT now()
+            );
+
+            -- 创建topics表
+            CREATE TABLE IF NOT EXISTS topics (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              title TEXT NOT NULL,
+              content TEXT NOT NULL,
+              founder TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active',
+              summary TEXT DEFAULT '',
+              create_time TEXT NOT NULL,
+              end_time TEXT DEFAULT '',
+              created_at TIMESTAMP DEFAULT now()
+            );
+
+            -- 创建messages表
+            CREATE TABLE IF NOT EXISTS messages (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              topic_id UUID REFERENCES topics(id),
+              sender TEXT NOT NULL,
+              content TEXT NOT NULL,
+              time TEXT NOT NULL,
+              is_founder BOOLEAN DEFAULT false,
+              created_at TIMESTAMP DEFAULT now()
+            );
+
+            -- 创建knowledge表
+            CREATE TABLE IF NOT EXISTS knowledge (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              title TEXT NOT NULL,
+              type TEXT NOT NULL,
+              content TEXT NOT NULL,
+              author TEXT NOT NULL,
+              time TEXT NOT NULL,
+              created_at TIMESTAMP DEFAULT now()
+            );
+
+            -- 创建business_plans表
+            CREATE TABLE IF NOT EXISTS business_plans (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              project_info JSONB DEFAULT '{}',
+              outline JSONB DEFAULT '{}',
+              completed_sections JSONB DEFAULT '[]',
+              created_at TIMESTAMP DEFAULT now(),
+              updated_at TIMESTAMP DEFAULT now()
+            );
+
+            -- 创建agent_records表
+            CREATE TABLE IF NOT EXISTS agent_records (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              topic_id UUID REFERENCES topics(id),
+              topic_title TEXT NOT NULL,
+              summary TEXT NOT NULL,
+              guide TEXT NOT NULL,
+              time TEXT NOT NULL,
+              created_at TIMESTAMP DEFAULT now()
+            );
+
+            -- 启用Row Level Security
+            ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE topics ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE knowledge ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE business_plans ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE agent_records ENABLE ROW LEVEL SECURITY;
+
+            -- 创建安全策略
+            CREATE POLICY "Allow public read access" ON users FOR SELECT USING (true);
+            CREATE POLICY "Allow public insert" ON users FOR INSERT WITH CHECK (true);
+            CREATE POLICY "Allow public read access" ON topics FOR SELECT USING (true);
+            CREATE POLICY "Allow public insert" ON topics FOR INSERT WITH CHECK (true);
+            CREATE POLICY "Allow public update" ON topics FOR UPDATE USING (true);
+            CREATE POLICY "Allow public read access" ON messages FOR SELECT USING (true);
+            CREATE POLICY "Allow public insert" ON messages FOR INSERT WITH CHECK (true);
+            CREATE POLICY "Allow public read access" ON knowledge FOR SELECT USING (true);
+            CREATE POLICY "Allow public insert" ON knowledge FOR INSERT WITH CHECK (true);
+            CREATE POLICY "Allow public read access" ON business_plans FOR SELECT USING (true);
+            CREATE POLICY "Allow public update" ON business_plans FOR UPDATE USING (true);
+            CREATE POLICY "Allow public read access" ON agent_records FOR SELECT USING (true);
+            CREATE POLICY "Allow public insert" ON agent_records FOR INSERT WITH CHECK (true);
+          `);
+        }
+        console.log('Supabase初始化成功');
+      } catch (error) {
+        console.error('Supabase初始化失败:', error);
+      }
+    }
+
     // 初始化本地存储（若不存在则创建空对象/数组）
     function initStorage() {
+      // 保留本地存储作为备份和离线使用
       if (!localStorage.getItem(STORAGE_KEYS.USERS)) localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([]));
       if (!localStorage.getItem(STORAGE_KEYS.TOPICS)) localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify([]));
       if (!localStorage.getItem(STORAGE_KEYS.KNOWLEDGE)) localStorage.setItem(STORAGE_KEYS.KNOWLEDGE, JSON.stringify([]));
@@ -443,20 +559,48 @@
     }
 
     // 检查登录状态
-    function checkLoginStatus() {
-      const currentUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER));
-      if (currentUser) {
-        // 已登录
-        document.getElementById('login-page').classList.add('hidden');
-        document.getElementById('navbar').classList.remove('hidden');
-        document.getElementById('main-content').classList.remove('hidden');
-        document.getElementById('user-name').textContent = currentUser.username;
-        switchTab('discuss-tab');
-      } else {
-        // 未登录
-        document.getElementById('login-page').classList.remove('hidden');
-        document.getElementById('navbar').classList.add('hidden');
-        document.getElementById('main-content').classList.add('hidden');
+    async function checkLoginStatus() {
+      try {
+        // 检查Supabase认证状态
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // 已登录
+          document.getElementById('login-page').classList.add('hidden');
+          document.getElementById('navbar').classList.remove('hidden');
+          document.getElementById('main-content').classList.remove('hidden');
+          document.getElementById('user-name').textContent = user.email || user.user_metadata?.username;
+          switchTab('discuss-tab');
+        } else {
+          // 检查本地存储（兼容旧系统）
+          const currentUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER));
+          if (currentUser) {
+            document.getElementById('login-page').classList.add('hidden');
+            document.getElementById('navbar').classList.remove('hidden');
+            document.getElementById('main-content').classList.remove('hidden');
+            document.getElementById('user-name').textContent = currentUser.username;
+            switchTab('discuss-tab');
+          } else {
+            // 未登录
+            document.getElementById('login-page').classList.remove('hidden');
+            document.getElementById('navbar').classList.add('hidden');
+            document.getElementById('main-content').classList.add('hidden');
+          }
+        }
+      } catch (error) {
+        console.error('检查登录状态失败:', error);
+        // 降级到本地存储
+        const currentUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER));
+        if (currentUser) {
+          document.getElementById('login-page').classList.add('hidden');
+          document.getElementById('navbar').classList.remove('hidden');
+          document.getElementById('main-content').classList.remove('hidden');
+          document.getElementById('user-name').textContent = currentUser.username;
+          switchTab('discuss-tab');
+        } else {
+          document.getElementById('login-page').classList.remove('hidden');
+          document.getElementById('navbar').classList.add('hidden');
+          document.getElementById('main-content').classList.add('hidden');
+        }
       }
     }
 
@@ -516,7 +660,7 @@
       });
 
       // 注册表单提交
-      document.getElementById('register-form').addEventListener('submit', function(e) {
+      document.getElementById('register-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         const username = document.getElementById('reg-username').value.trim();
         const password = document.getElementById('reg-password').value.trim();
@@ -540,41 +684,109 @@
           return;
         }
         
-        // 添加新用户
-        users.push({ username, password });
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-        // 自动登录
-        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({ username }));
-        alert('注册成功！');
-        updateRegisterQuota();
-        checkLoginStatus();
-        this.reset();
+        try {
+          // 使用Supabase Auth注册
+          const { data, error } = await supabase.auth.signUp({
+            email: `${username}@example.com`, // 使用用户名作为邮箱前缀
+            password: password,
+            options: {
+              data: {
+                username: username
+              }
+            }
+          });
+          
+          if (error) {
+            throw error;
+          }
+          
+          // 同时保存到users表
+          const { error: dbError } = await supabase
+            .from('users')
+            .insert({ username, password });
+          
+          if (dbError) {
+            console.error('保存用户到数据库失败:', dbError);
+          }
+          
+          // 兼容旧系统
+          users.push({ username, password });
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+          localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({ username }));
+          
+          alert('注册成功！');
+          updateRegisterQuota();
+          await checkLoginStatus();
+          this.reset();
+        } catch (error) {
+          console.error('注册失败:', error);
+          
+          // 降级到本地存储
+          users.push({ username, password });
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+          localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({ username }));
+          alert('注册成功！');
+          updateRegisterQuota();
+          checkLoginStatus();
+          this.reset();
+        }
       });
 
       // 登录表单提交
-      document.getElementById('login-form').addEventListener('submit', function(e) {
+      document.getElementById('login-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         const username = document.getElementById('login-username').value.trim();
         const password = document.getElementById('login-password').value.trim();
-        const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS));
         
-        // 验证用户
-        const user = users.find(user => user.username === username && user.password === password);
-        if (user) {
+        try {
+          // 使用Supabase Auth登录
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: `${username}@example.com`,
+            password: password
+          });
+          
+          if (error) {
+            throw error;
+          }
+          
+          // 兼容旧系统
           localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({ username }));
           alert('登录成功！');
-          checkLoginStatus();
+          await checkLoginStatus();
           this.reset();
-        } else {
-          alert('用户名或密码错误！');
+        } catch (error) {
+          console.error('登录失败:', error);
+          
+          // 降级到本地存储
+          const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS));
+          const user = users.find(user => user.username === username && user.password === password);
+          if (user) {
+            localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({ username }));
+            alert('登录成功！');
+            checkLoginStatus();
+            this.reset();
+          } else {
+            alert('用户名或密码错误！');
+          }
         }
       });
 
       // 退出登录
-      document.getElementById('logout-btn').addEventListener('click', function() {
+      document.getElementById('logout-btn').addEventListener('click', async function() {
         if (confirm('确定要退出登录吗？')) {
-          localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-          checkLoginStatus();
+          try {
+            // 使用Supabase Auth退出
+            const { error } = await supabase.auth.signOut();
+            if (error) {
+              console.error('退出登录失败:', error);
+            }
+          } catch (error) {
+            console.error('退出登录失败:', error);
+          } finally {
+            // 清理本地存储
+            localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+            await checkLoginStatus();
+          }
         }
       });
 
@@ -584,12 +796,12 @@
       document.getElementById('tab-knowledge').addEventListener('click', () => switchTab('knowledge-tab'));
 
       // 发起新议题
-      document.getElementById('new-topic-form').addEventListener('submit', function(e) {
+      document.getElementById('new-topic-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         const title = document.getElementById('topic-title').value.trim();
         const content = document.getElementById('topic-content').value.trim();
         const currentUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER));
-        const topics = JSON.parse(localStorage.getItem(STORAGE_KEYS.TOPICS));
+        const createTime = formatTime(new Date());
         
         // 生成新议题
         const newTopic = {
@@ -597,29 +809,79 @@
           title,
           content,
           founder: currentUser.username,
-          status: 'active', // active: 进行中, archived: 已存档
+          status: 'active',
           messages: [
             {
               sender: currentUser.username,
               content,
-              time: formatTime(new Date()),
+              time: createTime,
               isFounder: true
             }
           ],
           summary: '',
-          createTime: formatTime(new Date()),
+          createTime: createTime,
           endTime: '',
           businessPlan: {},
           agentRecords: []
         };
         
-        topics.unshift(newTopic);
-        localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(topics));
-        alert('议题发起成功！');
-        this.reset();
-        renderTopics('active');
-        // 自动打开新议题
-        openChat(newTopic.id);
+        try {
+          // 保存到Supabase
+          const { data: topicData, error: topicError } = await supabase
+            .from('topics')
+            .insert({
+              id: newTopic.id,
+              title: newTopic.title,
+              content: newTopic.content,
+              founder: newTopic.founder,
+              status: newTopic.status,
+              summary: newTopic.summary,
+              create_time: newTopic.createTime,
+              end_time: newTopic.endTime
+            })
+            .select();
+          
+          if (topicError) {
+            throw topicError;
+          }
+          
+          // 保存消息
+          const { error: messageError } = await supabase
+            .from('messages')
+            .insert({
+              topic_id: newTopic.id,
+              sender: currentUser.username,
+              content: content,
+              time: createTime,
+              is_founder: true
+            });
+          
+          if (messageError) {
+            console.error('保存消息失败:', messageError);
+          }
+          
+          // 兼容旧系统
+          const topics = JSON.parse(localStorage.getItem(STORAGE_KEYS.TOPICS));
+          topics.unshift(newTopic);
+          localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(topics));
+          
+          alert('议题发起成功！');
+          this.reset();
+          renderTopics('active');
+          // 自动打开新议题
+          openChat(newTopic.id);
+        } catch (error) {
+          console.error('发起议题失败:', error);
+          
+          // 降级到本地存储
+          const topics = JSON.parse(localStorage.getItem(STORAGE_KEYS.TOPICS));
+          topics.unshift(newTopic);
+          localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(topics));
+          alert('议题发起成功！');
+          this.reset();
+          renderTopics('active');
+          openChat(newTopic.id);
+        }
       });
 
       // 议题列表切换（进行中/已存档）
